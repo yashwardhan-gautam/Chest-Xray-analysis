@@ -27,6 +27,13 @@ from keras.applications.mobilenet import MobileNet
 from keras.layers import GlobalAveragePooling2D, Dense, Dropout, Flatten
 from keras.models import Sequential
 from keras.callbacks import ModelCheckpoint, LearningRateScheduler, EarlyStopping, ReduceLROnPlateau
+from keras.preprocessing.image import img_to_array
+import cv2
+from keras.applications import imagenet_utils
+import keras.backend as K
+from skimage.transform import resize
+from keras import Model
+from keras.applications import VGG16,DenseNet201,ResNet101,VGG19,InceptionV3
 
 #Read the sample_labels.csv into a pandas dataframe
 all_xray_df = pd.read_csv('drive/My Drive/Chest_data/sample/sample_labels.csv')
@@ -130,20 +137,78 @@ for (c_x, c_y, c_ax) in zip(t_x, t_y, m_axs.flatten()):
                              if n_score>0.5]))
     c_ax.axis('off')
 
-"""## Creating models"""
+"""## Creating model using Keras Functional Model"""
 
-# create a function to return a mobileNetModel with the output layer having 15 output units
-base_mobilenet_model = MobileNet(input_shape =  t_x.shape[1:], 
-                                 include_top = False, weights = None)
-multi_disease_model = Sequential()
-multi_disease_model.add(base_mobilenet_model)
-multi_disease_model.add(GlobalAveragePooling2D())
-multi_disease_model.add(Dropout(0.5))
-multi_disease_model.add(Dense(512))
-multi_disease_model.add(Dropout(0.5))
-multi_disease_model.add(Dense(15, activation = 'sigmoid'))
+# create a function to return a mobileNet Model with the output layer having 15 output units
+def get_mobilenet():
+  base_mobilenet_model = MobileNet( input_shape = (128,128,3), include_top = False, weights = None)
+  pooling_layer=GlobalAveragePooling2D()(base_mobilenet_model.output)
+  dropout_layer1=Dropout(0.5)(pooling_layer)
+  dense_layer1=Dense(512)(dropout_layer1)
+  dropout_layer2=Dropout(0.5)(dense_layer1)
+  dense_layer2=Dense(15,activation='sigmoid')(dropout_layer2)
+  model=Model(inputs=base_mobilenet_model.inputs,outputs=dense_layer2)
+  return model
+
+# create a function to return a denseNet Model with the output layer having 15 output units
+def get_densenet():
+  base_densenet_model = DenseNet201( input_shape =  (128,128,3), include_top = False, weights = None)
+  pooling_layer=GlobalAveragePooling2D()(base_densenet_model.output)
+  dropout_layer1=Dropout(0.5)(pooling_layer)
+  dense_layer1=Dense(512)(dropout_layer1)
+  dropout_layer2=Dropout(0.5)(dense_layer1)
+  dense_layer2=Dense(15,activation='sigmoid')(dropout_layer2)
+  model=Model(inputs=base_densenet_model.inputs,outputs=dense_layer2)
+  return model
+
+# create a function to return a inception Model with the output layer having 15 output units
+def get_inception():
+  base_inception_model = InceptionV3( input_shape =  (128,128,3), include_top = False, weights = None)
+  pooling_layer=GlobalAveragePooling2D()(base_inception_model.output)
+  dropout_layer1=Dropout(0.5)(pooling_layer)
+  dense_layer1=Dense(512)(dropout_layer1)
+  dropout_layer2=Dropout(0.5)(dense_layer1)
+  dense_layer2=Dense(15,activation='sigmoid')(dropout_layer2)
+  model=Model(inputs=base_inception_model.inputs,outputs=dense_layer2)
+  return model
+
+# create a function to return a resnet Model with the output layer having 15 output units
+def get_resnet():
+  base_resnet_model = ResNet101( input_shape =  (128,128,3), include_top = False, weights = None)
+  pooling_layer=GlobalAveragePooling2D()(base_resnet_model.output)
+  dropout_layer1=Dropout(0.5)(pooling_layer)
+  dense_layer1=Dense(512)(dropout_layer1)
+  dropout_layer2=Dropout(0.5)(dense_layer1)
+  dense_layer2=Dense(15,activation='sigmoid')(dropout_layer2)
+  model=Model(inputs=base_resnet_model.inputs,outputs=dense_layer2)
+  return model
+
+# create a function to return a VGG16 Model with the output layer having 15 output units
+def get_VGG16():
+  base_VGG16_model = VGG16( input_shape =  (128,128,3), include_top = False, weights = None)
+  pooling_layer=GlobalAveragePooling2D()(base_VGG16_model.output)
+  dropout_layer1=Dropout(0.5)(pooling_layer)
+  dense_layer1=Dense(512)(dropout_layer1)
+  dropout_layer2=Dropout(0.5)(dense_layer1)
+  dense_layer2=Dense(15,activation='sigmoid')(dropout_layer2)
+  model=Model(inputs=base_VGG16_model.inputs,outputs=dense_layer2)
+  return model
+
+# create a function to return a VGG19 Model with the output layer having 15 output units
+def get_VGG19():
+  base_VGG19_model = VGG19( input_shape =  (128,128,3), include_top = False, weights = None)
+  pooling_layer=GlobalAveragePooling2D()(base_VGG19_model.output)
+  dropout_layer1=Dropout(0.5)(pooling_layer)
+  dense_layer1=Dense(512)(dropout_layer1)
+  dropout_layer2=Dropout(0.5)(dense_layer1)
+  dense_layer2=Dense(15,activation='sigmoid')(dropout_layer2)
+  model=Model(inputs=base_VGG19_model.inputs,outputs=dense_layer2)
+  return model
+
+"""## Model Selection and comparative analysis"""
 
 # choose an appropriate model and compile
+multi_disease_model=get_mobilenet()
 multi_disease_model.compile(optimizer = 'adam', loss = 'binary_crossentropy',
                            metrics = ['binary_accuracy', 'mae'])
 # print the model details
@@ -166,7 +231,7 @@ callbacks_list = [checkpoint, early]
 multi_disease_model.fit_generator(train_gen, 
                                   steps_per_epoch=100,
                                   validation_data = (test_X, test_Y), 
-                                  epochs = 3, 
+                                  epochs = 1, 
                                   callbacks = callbacks_list)
 
 """## Testing the performance of the model"""
@@ -179,3 +244,57 @@ res = multi_disease_model.evaluate(test_X,test_Y, batch_size = 32, verbose = Tru
 print('loss = ',res[0])
 print('Binary accuracy = ',res[1])
 print('Mean absolute error',res[2])
+
+"""## Heat map using Grad Cam"""
+
+def find_target_layer():
+  for layer in reversed(multi_disease_model.layers):
+    if len(layer.output_shape) == 4:
+      return layer.name
+
+layer=find_target_layer()
+#layer='block3_conv3'
+print(layer)
+
+def gen_heatmap(img1,target_class):
+  last_conv = multi_disease_model.get_layer(layer)
+  grads = K.gradients(multi_disease_model.output[:,target_class],last_conv.output)[0]
+  pooled_grads = K.mean(grads,axis=(0,1,2))
+  iterate = K.function([multi_disease_model.input],[pooled_grads,last_conv.output[0]])
+  pooled_grads_value,conv_layer_output = iterate([img1])
+  for i in range(pooled_grads_value.shape[0]):
+    conv_layer_output[:,:,i] *= pooled_grads_value[i]
+  heatmap = np.mean(conv_layer_output,axis=-1)
+  eps=1e-8
+  numer = heatmap - np.min(heatmap)
+  denom = (heatmap.max() - heatmap.min()) + eps
+  heatmap = numer / denom
+  upsample = resize(heatmap, IMG_SIZE,preserve_range=True)
+  return upsample
+
+img_index=all_xray_df['Image Index'].sample(16).tolist()
+base_path='drive/My Drive/Chest_data/sample/images/'
+
+img_array=np.zeros((16,128,128,3))
+img_list=[]
+for i in range(16) :
+  img_path=base_path+img_index[i]
+  img=cv2.imread(img_path)
+  img=cv2.resize(img,IMG_SIZE)
+  #plt.imshow(img)
+  img_list.append(img)
+  img_array[i] = img_to_array(img,dtype='float32')
+
+predict = multi_disease_model.predict(img_array)
+target_class=[]
+for p in range(predict.shape[0]):
+  target_class.append(np.argmax(predict[p]))
+  print("Target Class = %d"%target_class[p])
+
+fig, axs = plt.subplots(4, 4,figsize=(16,16))
+for i in range(4):
+  for j in range(4):
+    k=4*i+j
+    heatmap=gen_heatmap(img_array[k:k+1],target_class[k])
+    axs[i,j].imshow(img_list[k])
+    axs[i,j].imshow(heatmap,alpha=0.5)
